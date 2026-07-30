@@ -1,0 +1,86 @@
+name: My Build
+
+on:
+  workflow_dispatch:
+    inputs:
+      build_type:
+        description: "构建类型"
+        required: true
+        default: "release"
+        type: choice
+        options:
+          - release
+          - debug
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          # 必须拉取完整历史：versionCode = git rev-list --count HEAD
+          fetch-depth: 0
+
+      - name: Set up JDK
+        uses: actions/setup-java@v5
+        with:
+          distribution: oracle
+          java-version: "17.0.1"
+          architecture: x64
+          check-latest: false
+          cache: gradle
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+        with:
+          packages: ""
+
+      - name: Install Required Android SDK Packages
+        run: |
+          set -euo pipefail
+          sdkmanager --install \
+            "platform-tools" \
+            "platforms;android-36" \
+            "build-tools;36.0.0"
+          set +o pipefail
+          yes | sdkmanager --licenses >/dev/null
+          set -o pipefail
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          cache-read-only: false
+          gradle-version: wrapper
+
+      - name: Grant execute permission for gradlew
+        run: chmod +x gradlew
+
+      - name: Print Toolchain Versions
+        run: |
+          java -version
+          ./gradlew --version
+
+      - name: Build APKs
+        env:
+          BUILD_TYPE: ${{ inputs.build_type }}
+        run: |
+          set -euo pipefail
+          if [ "$BUILD_TYPE" = "debug" ]; then
+            ./gradlew --no-daemon --stacktrace :app:assembleDebug
+          else
+            ./gradlew --no-daemon --stacktrace :app:assembleRelease
+          fi
+
+      - name: List Outputs
+        env:
+          BUILD_TYPE: ${{ inputs.build_type }}
+        run: ls -lh "app/build/outputs/apk/${BUILD_TYPE}/"
+
+      - name: Upload APKs
+        uses: actions/upload-artifact@v4
+        with:
+          name: sesame-ag-apk-${{ inputs.build_type }}
+          path: app/build/outputs/apk/${{ inputs.build_type }}/*.apk
+          if-no-files-found: error
